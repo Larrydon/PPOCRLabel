@@ -188,7 +188,6 @@ class MainWindow(QMainWindow):
         self.key_previous_text = ""
         self.existed_key_cls_set = set()
         self.key_dialog_tip = get_str("keyDialogTip")
-
         self.defaultSaveDir = default_save_dir
 
         params = {
@@ -820,12 +819,23 @@ class MainWindow(QMainWindow):
 
         saveLabel = action(
             get_str("saveLabel"),
-            self.saveLabelFile,  #
+            self.saveLabelFile,
             "Ctrl+S",
             "save",
             get_str("saveLabel"),
             enabled=False,
         )
+
+        # >2025-12-08 Add
+        actionBatchRename = action(
+            get_str("batchRenameImageAndAnnotations"),
+            self.batch_renameFile,
+            "",
+            "save",
+            get_str("batchRenameImageAndAnnotations"),
+            enabled=False,
+        )
+        # <End
 
         exportJSON = action(
             get_str("exportJSON"),
@@ -995,6 +1005,7 @@ class MainWindow(QMainWindow):
             fitWidth=fitWidth,
             zoomActions=zoomActions,
             saveLabel=saveLabel,
+            actionBatchRename=actionBatchRename,
             change_cls=change_cls,
             undo=undo,
             undoLastPoint=undoLastPoint,
@@ -1009,6 +1020,7 @@ class MainWindow(QMainWindow):
                 opendir,
                 open_dataset_dir,
                 saveLabel,
+                actionBatchRename,
                 exportJSON,
                 resetAll,
                 quit,
@@ -1113,6 +1125,7 @@ class MainWindow(QMainWindow):
         self.autoSaveUnsavedChangesOption = QAction(
             get_str("autoSaveUnsavedChanges"), self
         )
+
         self.autoSaveUnsavedChangesOption.setCheckable(True)
         self.autoSaveUnsavedChangesOption.setChecked(
             settings.get(SETTING_PAINT_LABEL, False)
@@ -1129,6 +1142,7 @@ class MainWindow(QMainWindow):
                 saveLabel,
                 saveRec,
                 exportJSON,
+                actionBatchRename,
                 self.autoSaveOption,
                 self.autoReRecognitionOption,
                 self.autoSaveUnsavedChangesOption,
@@ -2418,7 +2432,9 @@ class MainWindow(QMainWindow):
 
         else:
             if self.lang == "ch":
-                self.msgBox.warning(self, "提示", "\n 原文件夹已不存在,请从新选择数据集路径!")
+                self.msgBox.warning(
+                    self, "提示", "\n 原文件夹已不存在,请从新选择数据集路径!"
+                )
             else:
                 self.msgBox.warning(
                     self,
@@ -2638,6 +2654,7 @@ class MainWindow(QMainWindow):
                     self.openNextImg()
                 self.actions.saveRec.setEnabled(True)
                 self.actions.saveLabel.setEnabled(True)
+                self.actions.actionBatchRename.setEnabled(True)
                 self.actions.exportJSON.setEnabled(True)
 
         elif mode == "Auto":
@@ -3444,6 +3461,7 @@ class MainWindow(QMainWindow):
                     self.fileStatedict[self.getImglabelidx(file)] = 1
                 self.actions.saveLabel.setEnabled(True)
                 self.actions.saveRec.setEnabled(True)
+                self.actions.actionBatchRename.setEnabled(True)
                 self.actions.exportJSON.setEnabled(True)
 
     def saveFilestate(self):
@@ -3549,6 +3567,193 @@ class MainWindow(QMainWindow):
             self,
             "Information",
             "Cropped images have been saved in " + str(crop_img_dir),
+        )
+
+    # 2025-12-08 Add
+    def _sort_and_rewrite_ppocr_file(self, filepath, path_mapping):
+        """
+        讀取 PPOCRLabel 檔案（Label.txt/fileState.txt），更新路徑後，
+        根據新的檔名路徑進行排序，然後寫回。
+
+        path_mapping 格式預期為 { '舊檔名.jpg': '新檔名.jpg' }
+        """
+        try:
+            if not os.path.exists(filepath):
+                print(f"警告：找不到 {filepath}，略過排序。")
+                return False
+
+            with open(filepath, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            if not lines:
+                print(f"檔案 {filepath} 為空，無需處理。")
+                return True
+
+            processed_lines = []
+
+            # --- 步驟 1: 逐行檢查並替換路徑 ---
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+
+                # 找到第一個 Tab 之前的部分 (即路徑/檔名)
+                parts = line.split("\t", 1)
+                current_path_in_file = parts[0]
+                annotation_data = parts[1] if len(parts) > 1 else ""
+
+                # 【核心修正點】：從帶有路徑的字串中，提取出純檔名
+                # 例如：'testIMG/20251209...0001.jpg' -> '20251209...0001.jpg'
+                filename_only = os.path.basename(current_path_in_file)
+
+                # 使用純檔名作為鍵來查詢 path_mapping
+                new_path_filename = path_mapping.get(filename_only)
+                # 替換掉舊檔名部分，保留資料夾前綴
+                new_path = current_path_in_file.replace(
+                    filename_only, new_path_filename, 1
+                )
+
+                if new_path_filename:
+                    # 使用新的路徑和舊的標註數據重構這一行
+                    updated_line = f"{new_path}\t{annotation_data}"
+                else:
+                    # 如果沒有更名，保持原樣
+                    updated_line = line
+
+                processed_lines.append(updated_line)
+
+            # --- 步驟 2: 依據所有行的**新**路徑進行排序 ---
+            # 排序 Key：使用每行第一個 Tab 之前的部分，這個部分現在已經是新檔名了
+            def sort_key(text_line):
+                return text_line.split("\t")[0]
+
+            # 直接對替換完成的列表進行排序
+            processed_lines.sort(key=sort_key)
+
+            # --- 步驟 3: 寫回檔案 ---
+            with open(filepath, "w", encoding="utf-8") as f:
+                # 寫入時，確保每行加上換行符，並且末尾也有換行符
+                f.write("\n".join(processed_lines) + "\n")
+
+            print(f"✅ 成功更新並**依據新檔名排序**檔案：{filepath}。")
+            return True
+
+        except Exception as e:
+            # 如果發生錯誤，打印錯誤信息
+            print(f"⛔ 處理並排序 {filepath} 時發生嚴重錯誤：{e}")
+            return False
+
+    def batch_renameFile(self):
+        """
+        批次更名影像檔案，並更新 Label.txt 和 fileState.txt 中的路徑。
+        """
+        from datetime import datetime
+
+        # 檢查當前是否有開啟的資料夾
+        # 這裡假設 self.currentPath() 返回的是圖片所在的資料夾
+        folder_path = self.currentPath()
+        if not folder_path:
+            self.errorMessage("錯誤", "請先使用 [開啟資料夾] 載入標註目錄！")
+            return
+
+        # PPOCRLabel 的 Label.txt 和 fileState.txt 通常在資料夾的上層，
+        # 但在您這個實作中，我們假設它們跟圖片檔案在同一個 folder_path 內 (如果不是，這裡的路徑需要調整)
+        label_dir = folder_path
+
+        # 彈出確認對話框 (修正了 JSON 的描述)
+        confirm = QMessageBox.question(
+            self,
+            "確認批次更名",
+            "您確定要對當前資料夾下的所有圖片執行批次更名，並同步更新 Label.txt 和 fileState.txt 嗎？\n\n**此操作不可逆！**\n\n(建議您先備份資料夾)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if confirm == QMessageBox.No:
+            return
+
+        # 獲取所有圖片檔案（忽略大小寫）
+        image_extensions = (
+            ".jpg",
+            ".jpeg",
+        )  # 擴充支援的格式   (".jpg", ".jpeg", ".png", ".bmp")
+        file_list = sorted(
+            [f for f in os.listdir(folder_path) if f.lower().endswith(image_extensions)]
+        )
+
+        if not file_list:
+            self.errorMessage("警告", "資料夾中沒有找到圖片檔案可供更名。")
+            return
+
+        print("--- 開始批次更名 ---")
+
+        # 用於記錄所有舊路徑到新路徑的映射，以便後續替換 Label.txt
+        path_mapping = {}
+
+        # 定義新的檔名：使用當前時間(14碼) + 流水號(4碼)
+        # 獲取當前時間並格式化為 YYYYMMDDHHMMSS (14碼)
+        current_time_str = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        for i, filename in enumerate(file_list):
+            try:
+                # 建立舊路徑和新路徑
+                extension = os.path.splitext(filename)[1]
+                old_image_path = os.path.join(folder_path, filename)
+
+                # 組合新的基礎檔名：時間(14碼) + 流水號(4碼)
+                new_name_base = f"{current_time_str}{i+1:04d}"
+                new_image_name = new_name_base + extension
+                new_image_path = os.path.join(folder_path, new_image_name)
+
+                # 1. 執行實際更名
+                if os.path.exists(old_image_path):
+                    os.rename(old_image_path, new_image_path)
+                    print(f"✅ 已更名：{filename} -> {new_image_name}")
+
+                    # 記錄映射：使用純檔名作為鍵和值，確保與 Label.txt/fileState.txt 內容格式一致
+                    old_rel_path = filename
+                    new_rel_path = new_image_name
+                    path_mapping[old_rel_path] = new_rel_path
+                else:
+                    print(f"警告：找不到影像檔案 {filename}，跳過。")
+                    continue
+
+            except Exception as e:
+                # 報告單個檔案的錯誤，但繼續執行
+                print(f"處理檔案 {filename} 時出錯: {e}")
+
+        print("--- 批次更名圖片完成，開始更新標註檔案 ---")
+
+        # --- 2. 批次更新 Label.txt 和 fileState.txt ---
+        label_path = os.path.join(label_dir, "Label.txt")
+        state_path = os.path.join(label_dir, "fileState.txt")
+
+        success_count = 0
+
+        # 針對 Label.txt：更新路徑並排序
+        if self._sort_and_rewrite_ppocr_file(label_path, path_mapping):
+            success_count += 1
+
+        # 針對 fileState.txt：更新路徑並排序
+        if self._sort_and_rewrite_ppocr_file(state_path, path_mapping):
+            success_count += 1
+
+        print("--- 批次更名與標註更新完成 ---")
+
+        # 重新載入資料夾，刷新檔案列表
+        # 使用 openDirDialog 並設定 silent=True 進行靜默重新載入
+        # 這樣它就不會彈出檔案選擇對話框，而是直接載入 folder_path
+        self.openDirDialog(dirpath=folder_path, silent=True)
+
+        # QMessageBox.information(
+        #     self,
+        #     "完成",
+        #     f"所有檔案已批次更名完成！\n已更新 {success_count} 個標註支援檔案。",
+        # )
+        QMessageBox.information(
+            self,
+            "完成",
+            f"所有檔案已批次更名完成！\n已更新 fileState.txt 與 Label.txt 檔案。",
         )
 
     def speedChoose(self):

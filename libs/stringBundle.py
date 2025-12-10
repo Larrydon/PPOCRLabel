@@ -59,14 +59,26 @@ class StringBundle:
 
     def __create_lookup_fallback_list(self, locale_str):
         result_paths = []
-        base_path = ":/strings"
-        result_paths.append(base_path)
+        # 移除或註解掉 Qt Resource System 的路徑
+        # base_path = ":/strings"
+        # result_paths.append(base_path)
+
+        # **新增：讀取檔案系統中的路徑**
+        global __dirpath__
+        base_path = os.path.join(__dirpath__, "strings")  # 假設您的資源檔都在這個目錄下
+        result_paths.append(base_path + ".properties")  # 基礎的 strings.properties
+
+        # ... (後續加入語言標籤的邏輯保持不變，但要加上 .properties 後綴)
+
         if locale_str is not None:
-            # Don't follow standard BCP47. Simple fallback
             tags = re.split("[^a-zA-Z]", locale_str)
             for tag in tags:
-                last_path = result_paths[-1]
-                result_paths.append(last_path + "-" + tag)
+                last_path = result_paths[-1].replace(
+                    ".properties", ""
+                )  # 移除後綴，以便添加語言標籤
+                result_paths.append(
+                    last_path + "-" + tag + ".properties"
+                )  # 加入語言標籤和後綴
 
         return result_paths
 
