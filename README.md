@@ -1,4 +1,30 @@
 # Fork from [PPOCRLabel-3.1.4](https://github.com/PFCCLab/PPOCRLabel)
+Run ENV
+Python:3.9.25
+
+## 1. 完全清理
+pip uninstall paddlepaddle paddleocr paddlex PPOCRLabel numpy opencv-contrib-python opencv-python ultralytics torch torchvision torchaudio modelscope -y
+
+pip cache purge
+
+
+## 2. 一次過安裝
+pip install -r requirements.txt --no-deps --no-cache-dir
+pip install -r requirements.txt  # 再跑一次解依賴
+
+
+## 3. 安裝穩定 CPU PyTorch
+pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+
+
+## 4. 測試 torch
+python -c "import torch; print('torch OK:', torch.__version__)"
+
+
+關鍵：用 --no-deps 先裝到底，再用正常模式解依賴，就能繞過 pip 解析器的「記憶效應」。
+現在照這做，保證一次成功！然後直接 python PPOCRLabel.py 啟動。
+
+
 
 
 English | [简体中文](README_ch.md)

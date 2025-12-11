@@ -1,6 +1,6 @@
-﻿paddlepaddle==3.2.2
+﻿numpy==1.26.4
+paddlepaddle==3.2.2
 paddleocr==3.3.2
 paddlex==3.3.10
 PPOCRLabel==3.1.4
-numpy>=2.3.5
-opencv_contrib_python==4.10.0.84
+opencv-contrib-python==4.10.0.84
