@@ -1,6 +1,6 @@
 # 專案結構文件樹
 
-- 專案結構文件樹（src）VSCode run Python
+- 專案結構文件樹（src）VSCode run Python(PPOCRLabel.py)
 - `.gitignore`
 - `CHANGELOG.md`
 - `README.md`
