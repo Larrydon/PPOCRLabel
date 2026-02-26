@@ -22,6 +22,7 @@ import numpy as np
 from PyQt5.QtCore import QRegExp, QT_VERSION_STR
 from PyQt5.QtGui import QIcon, QRegExpValidator, QColor
 from PyQt5.QtWidgets import QPushButton, QAction, QMenu
+import random
 
 logger = logging.getLogger("PPOCRLabel")
 
@@ -139,21 +140,79 @@ def natural_sort(list, key=lambda s: s):
     list.sort(key=sort_key)
 
 
-def get_rotate_crop_image(img, points):
-    # Use Green's theory to judge clockwise or counterclockwise
-    # author: biyanhua
+# def get_rotate_crop_image(img, points):
+#     # Use Green's theory to judge clockwise or counterclockwise
+#     # author: biyanhua
+#     d = 0.0
+#     for index in range(-1, 3):
+#         d += (
+#             -0.5
+#             * (points[index + 1][1] + points[index][1])
+#             * (points[index + 1][0] - points[index][0])
+#         )
+#     if d < 0:  # counterclockwise
+#         tmp = np.array(points)
+#         points[1], points[3] = tmp[3], tmp[1]
+
+#     try:
+#         img_crop_width = int(
+#             max(
+#                 np.linalg.norm(points[0] - points[1]),
+#                 np.linalg.norm(points[2] - points[3]),
+#             )
+#         )
+#         img_crop_height = int(
+#             max(
+#                 np.linalg.norm(points[0] - points[3]),
+#                 np.linalg.norm(points[1] - points[2]),
+#             )
+#         )
+#         pts_std = np.float32(
+#             [
+#                 [0, 0],
+#                 [img_crop_width, 0],
+#                 [img_crop_width, img_crop_height],
+#                 [0, img_crop_height],
+#             ]
+#         )
+#         M = cv2.getPerspectiveTransform(points, pts_std)
+#         dst_img = cv2.warpPerspective(
+#             img,
+#             M,
+#             (img_crop_width, img_crop_height),
+#             borderMode=cv2.BORDER_REPLICATE,
+#             flags=cv2.INTER_CUBIC,
+#         )
+#         dst_img_height, dst_img_width = dst_img.shape[0:2]
+#         if dst_img_height * 1.0 / dst_img_width >= 1.5:
+#             dst_img = np.rot90(dst_img)
+#         return dst_img
+#     except Exception as e:
+#         logger.error("Error in image processing: %s", e)
+
+
+def get_rotate_crop_image(img, points, target_size=(192, 48)):
+    """
+    整合 PaddleOCR 標準校正 + 強制拉伸
+    """
+    points = np.array(points, dtype=np.float32)
+
+    # 1. 頂點排序邏輯
     d = 0.0
     for index in range(-1, 3):
+        # 修正原本括號不對稱的問題
         d += (
             -0.5
             * (points[index + 1][1] + points[index][1])
             * (points[index + 1][0] - points[index][0])
         )
-    if d < 0:  # counterclockwise
-        tmp = np.array(points)
+
+    if d < 0:
+        tmp = points.copy()
         points[1], points[3] = tmp[3], tmp[1]
 
     try:
+        # 2. 計算校正後的目標寬高
         img_crop_width = int(
             max(
                 np.linalg.norm(points[0] - points[1]),
@@ -166,6 +225,8 @@ def get_rotate_crop_image(img, points):
                 np.linalg.norm(points[1] - points[2]),
             )
         )
+
+        # 3. 執行透視變換
         pts_std = np.float32(
             [
                 [0, 0],
@@ -174,7 +235,10 @@ def get_rotate_crop_image(img, points):
                 [0, img_crop_height],
             ]
         )
+
         M = cv2.getPerspectiveTransform(points, pts_std)
+
+        # 使用 BORDER_REPLICATE 處理邊緣，模擬自然背景
         dst_img = cv2.warpPerspective(
             img,
             M,
@@ -182,12 +246,22 @@ def get_rotate_crop_image(img, points):
             borderMode=cv2.BORDER_REPLICATE,
             flags=cv2.INTER_CUBIC,
         )
-        dst_img_height, dst_img_width = dst_img.shape[0:2]
-        if dst_img_height * 1.0 / dst_img_width >= 1.5:
+
+        # 4. 自動旋轉檢查 (針對直式物件)
+        h, w = dst_img.shape[:2]
+        if h / w >= 1.5:
             dst_img = np.rot90(dst_img)
-        return dst_img
+
+        # 5. 強制拉伸至目標尺寸 (192, 48)
+        # 使用 INTER_AREA 在縮小時效果較好，INTER_CUBIC 在放大時較銳利
+        # 這裡建議針對車牌這種小圖縮放使用 INTER_CUBIC
+        final_img = cv2.resize(dst_img, target_size, interpolation=cv2.INTER_CUBIC)
+
+        return final_img
+
     except Exception as e:
-        logger.error("Error in image processing: %s", e)
+        print(f"處理圖片時發生錯誤: {e}")
+        return None
 
 
 def boxPad(box, imgShape, pad: int) -> np.array:
