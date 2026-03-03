@@ -191,28 +191,27 @@ def natural_sort(list, key=lambda s: s):
 #         logger.error("Error in image processing: %s", e)
 
 
-def get_rotate_crop_image(img, points, target_size=(192, 48)):
+def get_rotate_crop_image(img, points, target_size=(320, 48)):
     """
-    整合 PaddleOCR 標準校正 + 強制拉伸
+    整合 PaddleOCR 標準校正:以車牌高度置中等比例縮放、寬度補齊padding(左右留空)
     """
     points = np.array(points, dtype=np.float32)
+    target_w, target_h = target_size  # (320, 48)
 
-    # 1. 頂點排序邏輯
+    # 1. 頂點排序與校正
     d = 0.0
     for index in range(-1, 3):
-        # 修正原本括號不對稱的問題
         d += (
             -0.5
             * (points[index + 1][1] + points[index][1])
             * (points[index + 1][0] - points[index][0])
         )
-
     if d < 0:
         tmp = points.copy()
         points[1], points[3] = tmp[3], tmp[1]
 
     try:
-        # 2. 計算校正後的目標寬高
+        # 2. 計算原始裁切區域的寬高
         img_crop_width = int(
             max(
                 np.linalg.norm(points[0] - points[1]),
@@ -226,7 +225,7 @@ def get_rotate_crop_image(img, points, target_size=(192, 48)):
             )
         )
 
-        # 3. 執行透視變換
+        # 3. 執行透視變換 (Crop)
         pts_std = np.float32(
             [
                 [0, 0],
@@ -235,10 +234,7 @@ def get_rotate_crop_image(img, points, target_size=(192, 48)):
                 [0, img_crop_height],
             ]
         )
-
         M = cv2.getPerspectiveTransform(points, pts_std)
-
-        # 使用 BORDER_REPLICATE 處理邊緣，模擬自然背景
         dst_img = cv2.warpPerspective(
             img,
             M,
@@ -251,11 +247,36 @@ def get_rotate_crop_image(img, points, target_size=(192, 48)):
         h, w = dst_img.shape[:2]
         if h / w >= 1.5:
             dst_img = np.rot90(dst_img)
+            h, w = dst_img.shape[:2]
 
-        # 5. 強制拉伸至目標尺寸 (192, 48)
-        # 使用 INTER_AREA 在縮小時效果較好，INTER_CUBIC 在放大時較銳利
-        # 這裡建議針對車牌這種小圖縮放使用 INTER_CUBIC
-        final_img = cv2.resize(dst_img, target_size, interpolation=cv2.INTER_CUBIC)
+        # --- 核心邏輯修改：保持比例縮放 + 置中 Padding ---
+
+        # 5. 計算等比例縮放後的寬度 (固定高度 target_h)
+        ratio = w / h
+        new_w = int(target_h * ratio)
+
+        # 限制寬度不超過 target_w
+        if new_w > target_w:
+            new_w = target_w
+
+        # 執行等比例縮放
+        # 使用 INTER_CUBIC 保持字體銳利度
+        resized_img = cv2.resize(
+            dst_img, (new_w, target_h), interpolation=cv2.INTER_CUBIC
+        )
+
+        # 6. 準備背景 Padding (模擬合成程式的隨機背景色感)
+        # 取得縮放圖的平均顏色並加入輕微隨機擾動
+        avg_color = np.mean(resized_img, axis=(0, 1))
+        # 這裡不加入隨機 random 是為了標註工具的穩定性，但維持平均色填充
+        bg_color = avg_color.tolist()
+
+        # 建立 320x48 的畫布
+        final_img = np.full((target_h, target_w, 3), bg_color, dtype=np.uint8)
+
+        # 7. 計算置中位置並貼上
+        paste_x = (target_w - new_w) // 2
+        final_img[:, paste_x : paste_x + new_w] = resized_img
 
         return final_img
 
