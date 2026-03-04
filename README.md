@@ -94,6 +94,7 @@ PPOCRLabel 3.1.4 使用了 PPStructureV3 表格檢測模組，因此 PaddleX 必
 框太小 → 字會被切掉<br>
 <br>
 理想：留一點點 padding，但不要太多，要能夠顯示完整車牌<br>
+=>	改為了同時可以提供給YOLO-Pose精準訓練4點，因此要確實點在4個頂點(框會很貼，幾乎沒有框)<br>
 <br>
 <br>
 
@@ -101,6 +102,7 @@ PPOCRLabel 3.1.4 使用了 PPStructureV3 表格檢測模組，因此 PaddleX 必
 PPOCRLabel 支援：<br>
 水平框（一般文字）<br>
 四點框（旋轉文字）<br>
+=>	改為了同時可以提供給YOLO-Pose精準訓練4點，因此都用四點框<br>
 <br>
 <br>
 
